@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iPECS 사무실 전화기 라벨 생성기</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PapaParse for CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- html2pdf for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+        
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        
+        /* 커스텀 스크롤바 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+        /* 개별 A4 페이지 스타일링 */
+        .a4-page {
+            width: 210mm;
+            height: 297mm;
+            padding: 10mm; /* 프린터 물리 여백 10mm 확보 */
+            box-sizing: border-box; 
+            background-color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            display: flex;
+            flex-wrap: wrap;
+            align-content: flex-start;
+            margin-bottom: 2rem; /* UI상에서 페이지 간 간격 */
+            flex-shrink: 0;
+            page-break-inside: avoid; /* 강제 잘림 방지 속성 */
+            break-inside: avoid;
+        }
+
+        /* PDF 생성 시 간격/그림자 일시 제거 */
+        .pdf-mode .a4-page {
+            margin-bottom: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+        }
+
+        /* 절취선 (연한 회색) */
+        .cut-line {
+            border: 0.5px solid #d1d5db; /* Tailwind gray-300 */
+            box-sizing: border-box;
+        }
+        
+        .inner-cut-line {
+            border: 0.5px solid #e5e7eb; /* Tailwind gray-200 */
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex overflow-hidden">
+
+    <!-- Left Sidebar: Settings -->
+    <div class="w-1/3 min-w-[400px] bg-white border-r shadow-lg flex flex-col h-full z-10">
+        <div class="p-6 border-b bg-gray-50 flex justify-between items-center">
+            <h1 class="text-xl font-bold text-gray-800">iPECS 라벨 제네레이터</h1>
+            <button onclick="downloadTemplate()" class="text-sm text-blue-600 hover:text-blue-800 underline">CSV 서식 다운로드</button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-6 space-y-8">
+            
+            <!-- 1. CSV 업로드 -->
+            <section>
+                <h2 class="text-sm font-semibold text-gray-500 uppercase mb-3">1. 데이터 업로드</h2>
+                <div class="flex items-center justify-center w-full">
+                    <label id="drop-zone" for="csv-upload" class="flex flex-col items-center justify-center w-full h-24 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition relative">
+                        <div class="flex flex-col items-center justify-center pt-5 pb-6 pointer-events-none">
+                            <p class="mb-1 text-sm text-gray-500"><span class="font-semibold text-blue-600">클릭</span> 또는 <span class="font-semibold text-blue-600">파일 드래그 앤 드롭</span></p>
+                            <p class="text-xs text-gray-400">팀이름, 이름, 번호 포함 (.csv)</p>
+                        </div>
+                        <input id="csv-upload" type="file" accept=".csv" class="hidden" onchange="handleFileUpload(event)" />
+                    </label>
+                </div>
+            </section>
+
+            <!-- 2. 기기 설정 -->
+            <section>
+                <h2 class="text-sm font-semibold text-gray-500 uppercase mb-3">2. 기기 설정</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">본체</label>
+                        <select id="main-device" class="w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border focus:border-blue-500 focus:ring-1 focus:ring-blue-500" onchange="updateState('mainDevice', this.value)">
+                            <option value="none">사용 안함</option>
+                            <option value="9002">LIP-9002 (4버튼)</option>
+                            <option value="9010">LIP-9010 (5버튼)</option>
+                            <option value="9020" selected>LIP-9020 (10버튼)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">모듈</label>
+                        <select id="module-device" class="w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border focus:border-blue-500 focus:ring-1 focus:ring-blue-500" onchange="updateState('moduleDevice', this.value)">
+                            <option value="none">사용 안함</option>
+                            <option value="9012">LIP-9012 (12버튼)</option>
+                            <option value="9024" selected>LIP-9024 (24버튼)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- 용량 표시 -->
+                <div id="capacity-indicator" class="mt-3 p-3 rounded bg-blue-50 text-sm border border-blue-100 flex justify-between items-center transition-colors duration-300">
+                    <span class="font-medium text-gray-700">기기 총 용량 (슬롯):</span>
+                    <span id="capacity-text" class="font-bold text-blue-600">34개</span>
+                </div>
+                <div id="capacity-warning" class="mt-1 text-xs text-red-500 hidden font-medium">
+                    ⚠️ 현재 인원 및 특수키가 기기 용량을 초과했습니다. 데이터가 잘릴 수 있습니다.
+                </div>
+            </section>
+
+            <!-- 3. 특수키 설정 -->
+            <section>
+                <h2 class="text-sm font-semibold text-gray-500 uppercase mb-3">3. 특수 기능키 추가</h2>
+                <div class="flex space-x-2 mb-3">
+                    <input type="number" id="sk-slot" placeholder="슬롯 번호 (2이상)" min="2" class="w-1/3 border border-gray-300 rounded-md p-2 text-sm">
+                    <input type="text" id="sk-text" placeholder="텍스트 (예: 당겨받기)" class="flex-1 border border-gray-300 rounded-md p-2 text-sm">
+                    <button onclick="addSpecialKey()" class="bg-gray-800 text-white px-3 py-2 rounded-md text-sm hover:bg-gray-700 transition">추가</button>
+                </div>
+                <ul id="special-keys-list" class="space-y-2 text-sm">
+                    <!-- 특수키 리스트 렌더링 영역 -->
+                </ul>
+            </section>
+
+            <!-- 4. 데이터 관리 & 정렬 -->
+            <section class="flex-1 flex flex-col min-h-[300px]">
+                <div class="flex justify-between items-end mb-3">
+                    <h2 class="text-sm font-semibold text-gray-500 uppercase">4. 데이터 및 팀 기준</h2>
+                    <select id="base-team" class="border border-gray-300 rounded-md p-1 text-sm bg-white shadow-sm w-32" onchange="updateState('baseTeam', this.value)">
+                        <option value="">기준 팀 선택</option>
+                    </select>
+                </div>
+                
+                <div class="border rounded-md bg-white flex-1 flex flex-col overflow-hidden">
+                    <div class="bg-gray-50 grid grid-cols-12 gap-2 p-2 text-xs font-semibold text-gray-600 border-b">
+                        <div class="col-span-2 text-center">포함</div>
+                        <div class="col-span-3">팀</div>
+                        <div class="col-span-3">이름</div>
+                        <div class="col-span-4">번호</div>
+                    </div>
+                    <div id="employee-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+                        <div class="text-center text-gray-400 text-sm py-8">CSV 파일을 업로드해주세요.</div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <div class="p-6 border-t bg-white">
+            <button onclick="generatePDF()" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow hover:bg-blue-700 transition flex justify-center items-center">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                PDF 출력 생성하기
+            </button>
+            <p class="text-xs text-center text-gray-500 mt-2">출력 시 프린터 설정에서 <strong>[실제 크기(배율 100%)]</strong>를 꼭 확인하세요!</p>
+        </div>
+    </div>
+
+    <!-- Right Content: Preview -->
+    <div class="w-2/3 bg-gray-200 p-8 overflow-y-auto relative" id="right-panel">
+        <div id="preview-container" class="flex flex-col items-center">
+            <!-- A4 페이지들이 여기에 렌더링 됩니다 -->
+            <div class="w-full h-[297mm] bg-white shadow flex items-center justify-center text-gray-400 text-lg">
+                좌측에서 데이터를 설정하면 여기에 미리보기가 생성됩니다.
+            </div>
+        </div>
+    </div>
+
+    <!-- ★ PDF 인쇄 경고 커스텀 모달 -->
+    <div id="pdf-alert-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div class="bg-white p-6 rounded-lg shadow-xl text-center max-w-sm">
+            <h3 class="text-lg font-bold text-red-600 mb-2">⚠️ 인쇄 주의사항</h3>
+            <p class="text-sm text-gray-700 mb-4">PDF 출력 후 프린터 인쇄 시, 반드시 배율을 <br><strong class="text-base text-black">[실제 크기(100%)]</strong>로 설정해주세요!</p>
+            <div class="flex justify-center space-x-2">
+                <button onclick="continueGeneratePDF()" class="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition">확인 및 생성</button>
+                <button onclick="closeModal()" class="bg-gray-200 text-gray-800 px-4 py-2 rounded shadow hover:bg-gray-300 transition">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ★ 일반 알림용 커스텀 모달 -->
+    <div id="custom-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div class="bg-white p-6 rounded-lg shadow-xl text-center max-w-sm">
+            <p id="custom-modal-text" class="text-sm text-gray-700 mb-4"></p>
+            <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition">확인</button>
+        </div>
+    </div>
+
+<script>
+    // --- 디바이스 규격 정의 ---
+    const DEVICE_SPECS = {
+        'none': { name: '안함', w: 0, h: 0, cols: 0, rows: 0, flow: 'row' },
+        '9002': { name: 'LIP-9002', w: 26.25, h: 16, cols: 4, rows: 1, flow: 'row' },
+        '9010': { name: 'LIP-9010', w: 21, h: 16, cols: 5, rows: 1, flow: 'row' },
+        '9020': { name: 'LIP-9020', w: 21, h: 8, cols: 5, rows: 2, flow: 'row' },
+        '9012': { name: 'LIP-9012-DSS', w: 22, h: 14.5, cols: 1, rows: 12, flow: 'column' },
+        '9024': { name: 'LIP-9024-DSS', w: 28.99, h: 7.47, cols: 1, rows: 24, flow: 'column' }
+    };
+
+    // 파스텔톤 컬러 팔레트 (팀 구별용)
+    const COLOR_PALETTE = [
+        '#fecaca', '#fde047', '#bbf7d0', '#bfdbfe', '#e9d5ff', 
+        '#fed7aa', '#fbcfe8', '#99f6e4', '#e5e7eb', '#fef08a'
+    ];
+
+    // --- 글로벌 상태 관리 ---
+    let state = {
+        rawEmployees: [],
+        teams: [],
+        baseTeam: '',
+        mainDevice: '9020',
+        moduleDevice: '9024',
+        specialKeys: [],
+        teamColors: {}
+    };
+
+    function init() {
+        setupDragAndDrop();
+    }
+
+    // --- 드래그 앤 드롭 설정 ---
+    function setupDragAndDrop() {
+        const dropZone = document.getElementById('drop-zone');
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('bg-gray-50', 'border-gray-300');
+            dropZone.classList.add('bg-blue-50', 'border-blue-400');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('bg-blue-50', 'border-blue-400');
+            dropZone.classList.add('bg-gray-50', 'border-gray-300');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('bg-blue-50', 'border-blue-400');
+            dropZone.classList.add('bg-gray-50', 'border-gray-300');
+
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                if (file.name.toLowerCase().endsWith('.csv')) {
+                    processCSVFile(file);
+                } else {
+                    showModalMsg("CSV 파일만 업로드 가능합니다.");
+                }
+            }
+        });
+    }
+
+    // --- CSV 파싱 및 상태 업데이트 ---
+    function handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        processCSVFile(file);
+        event.target.value = ''; // Input 리셋
+    }
+
+    function processCSVFile(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const buffer = e.target.result;
+            let text = "";
+            
+            try {
+                const decoder = new TextDecoder("utf-8", { fatal: true });
+                text = decoder.decode(buffer);
+            } catch (err) {
+                const decoder = new TextDecoder("euc-kr");
+                text = decoder.decode(buffer);
+            }
+
+            Papa.parse(text, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    let parsed = results.data.map((row, index) => {
+                        let team = '미지정', name = `이름없음${index}`, number = '';
+                        
+                        for (let key in row) {
+                            let cleanKey = key.replace(/[\uFEFF\s]/g, '');
+                            let val = row[key] ? String(row[key]).trim() : '';
+                            
+                            if (['팀', '팀명', '부서', 'team'].includes(cleanKey)) team = val || team;
+                            if (['이름', '성명', 'name'].includes(cleanKey)) name = val || name;
+                            if (['번호', '내선', '내선번호', 'number'].includes(cleanKey)) number = val || number;
+                        }
+                        
+                        return {
+                            id: `emp_${index}_${Date.now()}`,
+                            originalIndex: index,
+                            team: team,
+                            name: name,
+                            number: number,
+                            included: true
+                        };
+                    });
+
+                    parsed = parsed.filter(p => p.name !== `이름없음${parsed.indexOf(p)}` || p.number !== '');
+                    state.rawEmployees = parsed;
+                    extractTeams();
+                    renderUI();
+                },
+                error: function(err) {
+                    alert("CSV 파싱 중 오류가 발생했습니다. 파일 형식을 확인해주세요.");
+                }
+            });
+        };
+        
+        reader.readAsArrayBuffer(file);
+        event.target.value = '';
+    }
+
+    // --- 팀 추출 및 색상 할당 ---
+    function extractTeams() {
+        const teamSet = new Set();
+        state.rawEmployees.forEach(emp => teamSet.add(emp.team));
+        state.teams = Array.from(teamSet);
+        
+        if (!state.teams.includes(state.baseTeam)) {
+            state.baseTeam = '';
+        }
+
+        state.teamColors = {};
+        state.teams.forEach((team, index) => {
+            state.teamColors[team] = COLOR_PALETTE[index % COLOR_PALETTE.length];
+        });
+    }
+
+    function downloadTemplate() {
+        const csvContent = "팀,이름,번호\n개발팀,홍길동,1001\n개발팀,김철수,1002\n인사팀,이영희,2001";
+        const blob = new Blob(["\uFEFF"+csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "iPECS_라벨_업로드양식.csv");
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function addSpecialKey() {
+        const slotInput = document.getElementById('sk-slot');
+        const textInput = document.getElementById('sk-text');
+        const slot = parseInt(slotInput.value, 10);
+        const text = textInput.value.trim();
+
+        if (isNaN(slot) || slot < 2) {
+            alert("슬롯 번호는 2 이상의 숫자로 입력해주세요. (1번은 무조건 본인 슬롯입니다)");
+            return;
+        }
+        if (!text) {
+            alert("특수키에 표시될 텍스트를 입력해주세요.");
+            return;
+        }
+
+        state.specialKeys = state.specialKeys.filter(sk => sk.slot !== slot);
+        state.specialKeys.push({ id: Date.now(), slot, text });
+        state.specialKeys.sort((a, b) => a.slot - b.slot);
+
+        slotInput.value = '';
+        textInput.value = '';
+        renderUI();
+    }
+
+    function removeSpecialKey(id) {
+        state.specialKeys = state.specialKeys.filter(sk => sk.id !== id);
+        renderUI();
+    }
+
+    function updateState(key, value) {
+        state[key] = value;
+        renderUI();
+    }
+
+    function toggleEmployee(id) {
+        const emp = state.rawEmployees.find(e => e.id === id);
+        if (emp) {
+            emp.included = !emp.included;
+            renderUI();
+        }
+    }
+
+    function renderUI() {
+        renderEmployeeList();
+        renderBaseTeamSelect();
+        renderSpecialKeys();
+        updateCapacityWarning();
+        generatePreviewDOM();
+    }
+
+    function renderEmployeeList() {
+        const container = document.getElementById('employee-list');
+        if (state.rawEmployees.length === 0) {
+            container.innerHTML = '<div class="text-center text-gray-400 text-sm py-8">CSV 파일을 업로드해주세요.</div>';
+            return;
+        }
+
+        container.innerHTML = state.rawEmployees.map(emp => `
+            <div class="grid grid-cols-12 gap-2 items-center p-2 rounded hover:bg-gray-100 text-sm border-b border-gray-100 ${!emp.included ? 'opacity-40' : ''}">
+                <div class="col-span-2 flex justify-center">
+                    <input type="checkbox" ${emp.included ? 'checked' : ''} onchange="toggleEmployee('${emp.id}')" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer">
+                </div>
+                <div class="col-span-3 truncate" title="${emp.team}">
+                    <span class="inline-block w-3 h-3 rounded-full mr-1 align-middle" style="background-color: ${state.teamColors[emp.team] || '#ddd'}"></span>
+                    ${emp.team}
+                </div>
+                <div class="col-span-3 font-medium truncate">${emp.name}</div>
+                <div class="col-span-4 text-gray-600 font-mono">${emp.number}</div>
+            </div>
+        `).join('');
+    }
+
+    function renderBaseTeamSelect() {
+        const select = document.getElementById('base-team');
+        const currentVal = state.baseTeam;
+        
+        let html = '<option value="">선택 안함 (전체 1장)</option>';
+        state.teams.forEach(team => {
+            html += `<option value="${team}" ${team === currentVal ? 'selected' : ''}>${team}</option>`;
+        });
+        select.innerHTML = html;
+        state.baseTeam = select.value;
+    }
+
+    function renderSpecialKeys() {
+        const container = document.getElementById('special-keys-list');
+        if (state.specialKeys.length === 0) {
+            container.innerHTML = '<li class="text-xs text-gray-400 text-center">등록된 특수키가 없습니다.</li>';
+            return;
+        }
+
+        container.innerHTML = state.specialKeys.map(sk => `
+            <li class="flex justify-between items-center bg-gray-50 border border-gray-200 p-2 rounded">
+                <span class="font-medium text-blue-600 mr-2">[슬롯 ${sk.slot}]</span>
+                <span class="flex-1 text-gray-700 truncate">${sk.text}</span>
+                <button onclick="removeSpecialKey(${sk.id})" class="text-red-500 hover:text-red-700 text-lg leading-none">&times;</button>
+            </li>
+        `).join('');
+    }
+
+    function updateCapacityWarning() {
+        const main = DEVICE_SPECS[state.mainDevice];
+        const mod = DEVICE_SPECS[state.moduleDevice];
+        const totalSlots = (main.cols * main.rows) + (mod.cols * mod.rows);
+        
+        const activeCount = state.rawEmployees.filter(e => e.included).length;
+        const requiredSlots = activeCount + state.specialKeys.length;
+
+        const indicator = document.getElementById('capacity-indicator');
+        const textElem = document.getElementById('capacity-text');
+        const warning = document.getElementById('capacity-warning');
+
+        textElem.textContent = `${totalSlots}개`;
+
+        if (requiredSlots > totalSlots && totalSlots > 0 && activeCount > 0) {
+            indicator.classList.remove('bg-blue-50', 'border-blue-100');
+            indicator.classList.add('bg-red-50', 'border-red-200');
+            textElem.classList.remove('text-blue-600');
+            textElem.classList.add('text-red-600');
+            warning.classList.remove('hidden');
+        } else {
+            indicator.classList.add('bg-blue-50', 'border-blue-100');
+            indicator.classList.remove('bg-red-50', 'border-red-200');
+            textElem.classList.add('text-blue-600');
+            textElem.classList.remove('text-red-600');
+            warning.classList.add('hidden');
+        }
+    }
+
+    // ★ A4 규격에 맞게 라벨 스트립들을 '페이지 단위'로 자동 묶어주는 핵심 함수
+    function chunkStripsIntoPages(strips, spec) {
+        if (strips.length === 0) return [];
+        const stripW = spec.cols * spec.w;
+        const stripH = spec.rows * spec.h;
+        
+        // A4 내부 사용 가능 공간: 너비 190mm, 높이 277mm
+        // 소수점 오차 방지를 위해 0.1mm 정도의 톨러런스 부여
+        const stripsPerRow = Math.floor((190 + 0.1) / stripW) || 1; 
+        const rowsPerPage = Math.floor((277 + 0.1) / stripH) || 1;
+        const stripsPerPage = stripsPerRow * rowsPerPage; // 한 페이지에 들어갈 수 있는 최대 라벨 개수
+
+        const pages = [];
+        for (let i = 0; i < strips.length; i += stripsPerPage) {
+            const chunk = strips.slice(i, i + stripsPerPage);
+            const page = document.createElement('div');
+            page.className = 'a4-page';
+            
+            chunk.forEach(strip => page.appendChild(strip));
+            pages.push(page);
+        }
+        return pages;
+    }
+
+    // --- 핵심 로직: 라벨 DOM 생성 ---
+    function generatePreviewDOM() {
+        const container = document.getElementById('preview-container');
+        container.innerHTML = ''; 
+
+        if (state.rawEmployees.filter(e=>e.included).length === 0) {
+            container.innerHTML = '<div class="w-full h-[297mm] bg-white shadow flex items-center justify-center text-gray-400 text-lg">데이터가 없습니다.</div>';
+            return;
+        }
+
+        const mainSpec = DEVICE_SPECS[state.mainDevice];
+        const modSpec = DEVICE_SPECS[state.moduleDevice];
+        const totalMain = mainSpec.cols * mainSpec.rows;
+        const totalMod = modSpec.cols * modSpec.rows;
+        const totalSlots = totalMain + totalMod;
+
+        if (totalSlots === 0) {
+            container.innerHTML = '<div class="w-full h-[297mm] bg-white shadow flex items-center justify-center text-gray-400 text-lg">기기를 선택해주세요.</div>';
+            return;
+        }
+
+        const activeEmployees = state.rawEmployees.filter(e => e.included);
+        
+        let owners = [];
+        if (state.baseTeam) {
+            owners = activeEmployees.filter(e => e.team === state.baseTeam);
+        }
+        if (owners.length === 0) {
+            owners = [{ id: 'master', team: '전체', name: '기준인원없음', number: '-', isMaster: true }];
+        }
+
+        const mainStrips = [];
+        const modStrips = [];
+
+        owners.forEach(owner => {
+            let slots = new Array(totalSlots).fill(null);
+
+            state.specialKeys.forEach(sk => {
+                let idx = sk.slot - 1; 
+                if (idx > 0 && idx < totalSlots) { 
+                    slots[idx] = { type: 'special', text: sk.text };
+                }
+            });
+
+            if (!owner.isMaster) {
+                slots[0] = { type: 'person', data: owner };
+            }
+
+            let others = activeEmployees.filter(e => e.id !== owner.id);
+            others.sort((a, b) => {
+                if (state.baseTeam) {
+                    if (a.team === state.baseTeam && b.team !== state.baseTeam) return -1;
+                    if (a.team !== state.baseTeam && b.team === state.baseTeam) return 1;
+                }
+                return a.originalIndex - b.originalIndex;
+            });
+
+            let otherIdx = 0;
+            for (let i = (owner.isMaster ? 0 : 1); i < totalSlots; i++) {
+                if (slots[i] === null && otherIdx < others.length) {
+                    slots[i] = { type: 'person', data: others[otherIdx] };
+                    otherIdx++;
+                }
+            }
+
+            let mainSlice = slots.slice(0, totalMain);
+            let modSlice = slots.slice(totalMain, totalSlots);
+
+            if (totalMain > 0) {
+                mainStrips.push(createStripDOM(mainSpec, mainSlice));
+            }
+            if (totalMod > 0) {
+                modStrips.push(createStripDOM(modSpec, modSlice));
+            }
+        });
+
+        // ★ 모아진 스트립들을 규격에 맞춰 A4 페이지 단위로 묶음
+        const mainPages = chunkStripsIntoPages(mainStrips, mainSpec);
+        const modPages = chunkStripsIntoPages(modStrips, modSpec);
+
+        // 컨테이너에 각각 분리된 페이지들 추가
+        mainPages.forEach(page => container.appendChild(page));
+        modPages.forEach(page => container.appendChild(page));
+    }
+
+    function createStripDOM(spec, slotsData) {
+        const strip = document.createElement('div');
+        strip.className = 'label-strip cut-line bg-white';
+        strip.style.display = 'grid';
+        strip.style.gridTemplateColumns = `repeat(${spec.cols}, 1fr)`;
+        strip.style.gridTemplateRows = `repeat(${spec.rows}, 1fr)`;
+        strip.style.gridAutoFlow = spec.flow || 'row';
+        
+        strip.style.width = `${spec.cols * spec.w}mm`;
+        strip.style.height = `${spec.rows * spec.h}mm`;
+        strip.style.boxSizing = 'border-box';
+        
+        // ★ forEach에 index 파라미터 및 좌/우 정렬 로직 제거
+        slotsData.forEach(slot => {
+            const cell = document.createElement('div');
+            cell.className = 'inner-cut-line flex items-center justify-center text-center overflow-hidden';
+            
+            cell.style.width = `${spec.w}mm`;
+            cell.style.height = `${spec.h}mm`;
+            cell.style.boxSizing = 'border-box';
+            
+            const isSmallCell = spec.h <= 8;
+            const fontSize = isSmallCell ? '11px' : '14px'; 
+            
+            cell.style.fontSize = fontSize;
+            cell.style.letterSpacing = '-0.5px';
+            cell.style.lineHeight = '1'; 
+
+            if (slot) {
+                if (slot.type === 'person') {
+                    cell.style.backgroundColor = state.teamColors[slot.data.team] || '#fff';
+                    cell.style.color = '#111';
+                    
+                    if (!isSmallCell) {
+                        cell.innerHTML = `
+                            <div class="flex flex-col items-center justify-center w-full h-full">
+                                <div class="font-bold leading-tight whitespace-nowrap">${slot.data.name}</div>
+                                <div class="font-bold text-[0.9em] leading-tight text-gray-800">(${slot.data.number})</div>
+                            </div>
+                        `;
+                    } 
+                    else {
+                        cell.innerHTML = `
+                            <div class="w-full h-full flex justify-center items-center px-1 whitespace-nowrap">
+                                <span class="font-bold">${slot.data.name}</span>
+                                <span class="font-bold text-[0.9em] text-gray-800 ml-1">(${slot.data.number})</span>
+                            </div>
+                        `;
+                    }
+                } else if (slot.type === 'special') {
+                    cell.style.backgroundColor = '#e5e7eb'; 
+                    cell.style.color = '#374151';
+                    cell.style.fontWeight = 'bold';
+                    cell.textContent = slot.text;
+                }
+            }
+            strip.appendChild(cell);
+        });
+
+        return strip;
+    }
+
+    // ★ 모달 제어 함수 추가
+    function showModalMsg(msg) {
+        document.getElementById('custom-modal-text').textContent = msg;
+        document.getElementById('custom-modal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+        document.getElementById('pdf-alert-modal').classList.add('hidden');
+    }
+
+    // --- PDF 출력 처리 ---
+    function generatePDF() {
+        if (state.rawEmployees.filter(e=>e.included).length === 0) {
+            showModalMsg("출력할 데이터가 없습니다.");
+            return;
+        }
+
+        // 다운로드 실행 전, [실제 크기] 안내 팝업 띄우기
+        document.getElementById('pdf-alert-modal').classList.remove('hidden');
+    }
+
+    // 팝업에서 [확인]을 눌렀을 때 실제 다운로드 로직 실행
+    function continueGeneratePDF() {
+        closeModal();
+
+        const previewContainer = document.getElementById('preview-container');
+        const rightPanel = document.getElementById('right-panel'); 
+        
+        const originalBodyClasses = document.body.className;
+        const originalRightPanelClasses = rightPanel.className;
+
+        document.body.classList.remove('h-screen', 'overflow-hidden');
+        rightPanel.classList.remove('overflow-y-auto');
+        
+        // ★ PDF 모드 활성화: 각 A4 페이지(.a4-page)의 여백 및 섀도우를 없애서 
+        // 전체 높이가 정확히 N * 297mm가 되도록 만들어 자동 잘림 유도
+        previewContainer.classList.add('pdf-mode');
+        
+        window.scrollTo(0, 0);
+        rightPanel.scrollTo(0, 0);
+
+        const opt = {
+            margin:       0, 
+            filename:     `iPECS_라벨_${new Date().toISOString().slice(0,10)}.pdf`,
+            image:        { type: 'jpeg', quality: 1.0 },
+            html2canvas:  { 
+                scale: 3,
+                useCORS: true,
+                scrollY: 0, 
+                scrollX: 0
+            },
+            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            // ★ a4-page 클래스 자체를 페이지 기준으로
+            pagebreak:    { mode: 'css', avoid: '.a4-page' } 
+        };
+
+        const btn = document.querySelector('button[onclick="generatePDF()"]');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = 'PDF 생성 중... (잠시만 기다려주세요)';
+        btn.disabled = true;
+        btn.classList.add('opacity-70', 'cursor-not-allowed');
+
+        setTimeout(() => {
+            html2pdf().set(opt).from(previewContainer).save().then(() => {
+                document.body.className = originalBodyClasses;
+                rightPanel.className = originalRightPanelClasses;
+                previewContainer.classList.remove('pdf-mode');
+                
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
+            }).catch(err => {
+                console.error("PDF 생성 에러:", err);
+                showModalMsg("PDF 생성 중 오류가 발생했습니다.");
+                
+                document.body.className = originalBodyClasses;
+                rightPanel.className = originalRightPanelClasses;
+                previewContainer.classList.remove('pdf-mode');
+                
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
+            });
+        }, 300);
+    }
+
+    init();
+
+</script>
+</body>
+</html>
