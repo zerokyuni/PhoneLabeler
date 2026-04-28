@@ -40,11 +40,20 @@
             break-inside: avoid;
         }
 
-        /* PDF 생성 시 간격/그림자 일시 제거 */
+        /* PDF 생성 시 간격/그림자 일시 제거 및 빈 장 방지 최적화 */
+        .pdf-mode {
+            display: block !important; /* Flex 컨테이너 오차 해제 */
+        }
         .pdf-mode .a4-page {
             margin-bottom: 0 !important;
             box-shadow: none !important;
             border: none !important;
+            height: 296.9mm !important; /* 픽셀 오차로 인한 마지막 빈 장 생성 완벽 방지 */
+            overflow: hidden;
+            page-break-after: always; /* 페이지를 확실하게 끊어줌 */
+        }
+        .pdf-mode .a4-page:last-child {
+            page-break-after: auto; /* 제일 마지막 요소 뒤에는 새 페이지를 만들지 않음 */
         }
 
         /* 절취선 (연한 회색) */
@@ -306,6 +315,14 @@
                     });
 
                     parsed = parsed.filter(p => p.name !== `이름없음${parsed.indexOf(p)}` || p.number !== '');
+                    
+                    // ★ 파일 새로 업로드 시 기존 설정 및 데이터 완벽 초기화 (덮어쓰기 방지)
+                    state.specialKeys = [];
+                    state.baseTeam = '';
+                    document.getElementById('sk-slot').value = '';
+                    document.getElementById('sk-text').value = '';
+                    document.getElementById('base-team').value = '';
+
                     state.rawEmployees = parsed;
                     extractTeams();
                     renderUI();
@@ -701,8 +718,8 @@
                 scrollX: 0
             },
             jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            // ★ a4-page 클래스 자체를 페이지 기준으로
-            pagebreak:    { mode: 'css', avoid: '.a4-page' } 
+            // ★ a4-page 클래스 단위로 확실히 끊고, 불필요한 마지막 빈장 방지를 위해 mode: 'css'만 유지
+            pagebreak:    { mode: 'css' } 
         };
 
         const btn = document.querySelector('button[onclick="generatePDF()"]');
