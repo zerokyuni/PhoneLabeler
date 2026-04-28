@@ -103,7 +103,7 @@
             <section>
                 <div class="flex justify-between items-end mb-3">
                     <h2 class="text-sm font-semibold text-gray-500 uppercase">1. 연락처 및 빈자리 이미지(선택사항) 업로드</h2>
-                    <button onclick="clearLogo()" class="text-xs text-red-500 hover:text-red-700 underline" title="등록된 로고 워터마크 삭제">이미지 초기화</button>
+                    <button onclick="clearLogo()" class="text-xs text-red-500 hover:text-red-700 underline" title="등록된 빈자리 워터마크 삭제">이미지 초기화</button>
                 </div>
                 <div class="flex items-center justify-center w-full">
                     <label id="drop-zone" for="file-upload" class="flex flex-col items-center justify-center w-full h-24 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition relative">
@@ -299,7 +299,7 @@
         state.logoDataUrl = null;
         localStorage.removeItem('ipecs_logo');
         generatePreviewDOM();
-        showModalMsg("로고가 초기화되었습니다.");
+        showModalMsg("빈자리 이미지가 초기화되었습니다.");
     };
 
     // --- 파일 드래그 앤 드롭 설정 ---
@@ -359,10 +359,10 @@
             try {
                 localStorage.setItem('ipecs_logo', state.logoDataUrl);
             } catch(err) {
-                console.warn("로컬 스토리지 용량 초과로 로고가 저장되지 않았습니다.");
+                console.warn("로컬 스토리지 용량 초과로 이미지가 저장되지 않았습니다.");
             }
             generatePreviewDOM();
-            showModalMsg("로고가 성공적으로 적용되었습니다!");
+            showModalMsg("빈자리 이미지가 성공적으로 적용되었습니다!");
         };
         reader.readAsDataURL(file);
     }
