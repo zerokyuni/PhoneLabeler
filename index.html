@@ -43,17 +43,16 @@
         /* PDF 생성 시 간격/그림자 일시 제거 및 빈 장 방지 최적화 */
         .pdf-mode {
             display: block !important; /* Flex 컨테이너 오차 해제 */
+            margin: 0 !important;
+            padding: 0 !important;
         }
         .pdf-mode .a4-page {
-            margin-bottom: 0 !important;
+            margin: 0 !important;
             box-shadow: none !important;
             border: none !important;
-            height: 296.9mm !important; /* 픽셀 오차로 인한 마지막 빈 장 생성 완벽 방지 */
+            height: 296.5mm !important; /* 픽셀 오차로 인한 빈 장 생성을 막기 위해 높이 미세 축소 */
             overflow: hidden;
-            page-break-after: always; /* 페이지를 확실하게 끊어줌 */
-        }
-        .pdf-mode .a4-page:last-child {
-            page-break-after: auto; /* 제일 마지막 요소 뒤에는 새 페이지를 만들지 않음 */
+            /* 강제 page-break를 제거하여 2페이지 빈장 버그 해결 */
         }
 
         /* 절취선 (연한 회색) */
@@ -65,6 +64,12 @@
         .inner-cut-line {
             border: 0.5px solid #e5e7eb; /* Tailwind gray-200 */
             box-sizing: border-box;
+        }
+
+        /* 드래그 앤 드롭 효과 클래스 */
+        .drag-over {
+            border-top: 2px solid #3b82f6 !important;
+            background-color: #eff6ff !important;
         }
     </style>
 </head>
@@ -110,8 +115,8 @@
                         <label class="block text-xs font-medium text-gray-700 mb-1">추가모듈</label>
                         <select id="module-device" class="w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border focus:border-blue-500 focus:ring-1 focus:ring-blue-500" onchange="updateState('moduleDevice', this.value)">
                             <option value="none">사용 안함</option>
-                            <option value="9012">LIP-9012-DSS (12버튼)</option>
-                            <option value="9024" selected>LIP-9024-DSS (24버튼)</option>
+                            <option value="9012">LIP-9012 (12버튼)</option>
+                            <option value="9024" selected>LIP-9024 (24버튼)</option>
                         </select>
                     </div>
                 </div>
@@ -147,10 +152,29 @@
                         <option value="">기준 팀 선택</option>
                     </select>
                 </div>
+
+                <!-- 팀 색상 설정 영역 -->
+                <div class="mb-3 bg-white p-3 rounded-md border border-gray-200">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-600">🎨 팀 색상 (배경색) 지정</span>
+                        <select id="color-mode" onchange="toggleColorMode(this.value)" class="text-xs border border-gray-300 rounded p-1 shadow-sm">
+                            <option value="auto">자동 (Auto)</option>
+                            <option value="custom">커스텀 지정</option>
+                        </select>
+                    </div>
+                    <div id="custom-color-panel" class="hidden grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                        <!-- 동적 컬러 픽커 렌더링 영역 -->
+                    </div>
+                </div>
                 
+                <!-- 직원 리스트 (드래그앤드롭 가능) -->
                 <div class="border rounded-md bg-white flex-1 flex flex-col overflow-hidden">
-                    <div class="bg-gray-50 grid grid-cols-12 gap-2 p-2 text-xs font-semibold text-gray-600 border-b">
-                        <div class="col-span-2 text-center">포함</div>
+                    <div class="bg-gray-50 grid grid-cols-12 gap-1 p-2 text-xs font-semibold text-gray-600 border-b items-center">
+                        <div class="col-span-1 text-center flex justify-center">
+                            <!-- 전체 선택/해제 체크박스 -->
+                            <input type="checkbox" id="select-all-cb" onchange="toggleAllEmployees(this.checked)" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer">
+                        </div>
+                        <div class="col-span-1 text-center" title="드래그 앤 드롭으로 순서 변경">순서</div>
                         <div class="col-span-3">팀</div>
                         <div class="col-span-3">이름</div>
                         <div class="col-span-4">번호</div>
@@ -213,10 +237,10 @@
         '9024': { name: 'LIP-9024-DSS', w: 28.2, h: 7.21, cols: 1, rows: 24, flow: 'column' }
     };
 
-    // 파스텔톤 컬러 팔레트 (팀 구별용)
+    // 파스텔톤 컬러 팔레트 (팀 구별용 기본 프리셋)
     const COLOR_PALETTE = [
         '#fecaca', '#fde047', '#bbf7d0', '#bfdbfe', '#e9d5ff', 
-        '#fed7aa', '#fbcfe8', '#99f6e4', '#e5e7eb', '#fef08a'
+        '#fed7aa', '#fbcfe8', '#99f6e4', '#e5e7eb', '#fef08a', '#d9f99d', '#bae6fd'
     ];
 
     // --- 글로벌 상태 관리 ---
@@ -227,14 +251,18 @@
         mainDevice: '9020',
         moduleDevice: '9024',
         specialKeys: [],
+        colorMode: 'auto', // 'auto' 또는 'custom'
         teamColors: {}
     };
+
+    // 드래그 앤 드롭용 글로벌 변수
+    let dragStartIndex = -1;
 
     function init() {
         setupDragAndDrop();
     }
 
-    // --- 드래그 앤 드롭 설정 ---
+    // --- 파일 드래그 앤 드롭 설정 ---
     function setupDragAndDrop() {
         const dropZone = document.getElementById('drop-zone');
 
@@ -306,7 +334,7 @@
                         
                         return {
                             id: `emp_${index}_${Date.now()}`,
-                            originalIndex: index,
+                            originalIndex: index, // CSV 인덱스
                             team: team,
                             name: name,
                             number: number,
@@ -322,6 +350,8 @@
                     document.getElementById('sk-slot').value = '';
                     document.getElementById('sk-text').value = '';
                     document.getElementById('base-team').value = '';
+                    document.getElementById('color-mode').value = 'auto';
+                    state.colorMode = 'auto';
 
                     state.rawEmployees = parsed;
                     extractTeams();
@@ -334,10 +364,9 @@
         };
         
         reader.readAsArrayBuffer(file);
-        event.target.value = '';
     }
 
-    // --- 팀 추출 및 색상 할당 ---
+    // --- 팀 추출 및 색상 할당 로직 ---
     function extractTeams() {
         const teamSet = new Set();
         state.rawEmployees.forEach(emp => teamSet.add(emp.team));
@@ -347,12 +376,55 @@
             state.baseTeam = '';
         }
 
-        state.teamColors = {};
-        state.teams.forEach((team, index) => {
-            state.teamColors[team] = COLOR_PALETTE[index % COLOR_PALETTE.length];
-        });
+        // 색상 모드에 따른 처리
+        if (state.colorMode === 'auto') {
+            state.teamColors = {}; // 완전히 덮어쓰기
+            state.teams.forEach((team, index) => {
+                state.teamColors[team] = COLOR_PALETTE[index % COLOR_PALETTE.length];
+            });
+        } else {
+            // 커스텀 모드일 때는, 새로운 팀이 생겼을 때만 기본색 부여 (기존에 설정한 커스텀색 보호)
+            state.teams.forEach((team, index) => {
+                if (!state.teamColors[team]) {
+                    state.teamColors[team] = COLOR_PALETTE[index % COLOR_PALETTE.length];
+                }
+            });
+        }
     }
 
+    // --- 컬러 커스터마이징 렌더링 ---
+    function toggleColorMode(mode) {
+        state.colorMode = mode;
+        const panel = document.getElementById('custom-color-panel');
+        
+        if (mode === 'custom') {
+            panel.classList.remove('hidden');
+            panel.classList.add('grid');
+            renderCustomColorPanel();
+        } else {
+            panel.classList.add('hidden');
+            panel.classList.remove('grid');
+            extractTeams(); // 자동 색상으로 리셋
+            renderUI();
+        }
+    }
+
+    function renderCustomColorPanel() {
+        const panel = document.getElementById('custom-color-panel');
+        panel.innerHTML = state.teams.map(team => `
+            <div class="flex items-center space-x-2 bg-gray-50 p-1 border rounded">
+                <input type="color" value="${state.teamColors[team]}" onchange="updateTeamColor('${team}', this.value)" class="w-6 h-6 border-none cursor-pointer p-0 bg-transparent">
+                <span class="truncate flex-1">${team}</span>
+            </div>
+        `).join('');
+    }
+
+    function updateTeamColor(team, colorHex) {
+        state.teamColors[team] = colorHex;
+        generatePreviewDOM(); // 컬러만 바뀌면 프리뷰만 다시 렌더링
+    }
+
+    // --- 다운로드 서식 ---
     function downloadTemplate() {
         const csvContent = "팀,이름,번호\n개발팀,홍길동,1001\n개발팀,김철수,1002\n인사팀,이영희,2001";
         const blob = new Blob(["\uFEFF"+csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -366,6 +438,7 @@
         document.body.removeChild(link);
     }
 
+    // --- 특수키 및 상태 업데이트 ---
     function addSpecialKey() {
         const slotInput = document.getElementById('sk-slot');
         const textInput = document.getElementById('sk-text');
@@ -400,6 +473,7 @@
         renderUI();
     }
 
+    // --- 데이터 리스트 컨트롤 ---
     function toggleEmployee(id) {
         const emp = state.rawEmployees.find(e => e.id === id);
         if (emp) {
@@ -408,6 +482,59 @@
         }
     }
 
+    // ★ 전체 선택/해제 로직 추가
+    function toggleAllEmployees(isChecked) {
+        state.rawEmployees.forEach(emp => emp.included = isChecked);
+        renderUI();
+    }
+
+    // --- 행(Row) 드래그 앤 드롭 함수 ---
+    window.handleRowDragStart = function(e, index) {
+        dragStartIndex = index;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', index);
+        e.target.style.opacity = '0.5';
+    };
+
+    window.handleRowDragOver = function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const row = e.target.closest('.employee-row');
+        if (row) row.classList.add('drag-over');
+    };
+
+    window.handleRowDragLeave = function(e) {
+        const row = e.target.closest('.employee-row');
+        if (row) row.classList.remove('drag-over');
+    };
+
+    window.handleRowDrop = function(e, dropIndex) {
+        e.preventDefault();
+        const row = e.target.closest('.employee-row');
+        if (row) row.classList.remove('drag-over');
+
+        const sourceIndex = dragStartIndex;
+        if (sourceIndex === -1 || sourceIndex === dropIndex) return;
+
+        // 배열에서 아이템을 빼서 드롭된 위치로 이동
+        const draggedItem = state.rawEmployees.splice(sourceIndex, 1)[0];
+        state.rawEmployees.splice(dropIndex, 0, draggedItem);
+
+        // 변경된 배열 순서를 기반으로 originalIndex를 재할당 (출력 순서 고정을 위해)
+        state.rawEmployees.forEach((emp, i) => emp.originalIndex = i);
+
+        dragStartIndex = -1;
+        renderUI();
+    };
+
+    window.handleRowDragEnd = function(e) {
+        e.target.style.opacity = '1';
+        dragStartIndex = -1;
+        // 잔여 drag-over 클래스 정리
+        document.querySelectorAll('.employee-row').forEach(row => row.classList.remove('drag-over'));
+    };
+
+    // --- 메인 UI 렌더링 ---
     function renderUI() {
         renderEmployeeList();
         renderBaseTeamSelect();
@@ -418,22 +545,39 @@
 
     function renderEmployeeList() {
         const container = document.getElementById('employee-list');
+        const selectAllCb = document.getElementById('select-all-cb');
+
         if (state.rawEmployees.length === 0) {
             container.innerHTML = '<div class="text-center text-gray-400 text-sm py-8">CSV 파일을 업로드해주세요.</div>';
+            selectAllCb.checked = false;
             return;
         }
 
-        container.innerHTML = state.rawEmployees.map(emp => `
-            <div class="grid grid-cols-12 gap-2 items-center p-2 rounded hover:bg-gray-100 text-sm border-b border-gray-100 ${!emp.included ? 'opacity-40' : ''}">
-                <div class="col-span-2 flex justify-center">
+        // 전체 선택 체크박스 상태 동기화
+        const allChecked = state.rawEmployees.every(emp => emp.included);
+        selectAllCb.checked = allChecked;
+
+        // 드래그 앤 드롭이 가능하도록 렌더링 변경
+        container.innerHTML = state.rawEmployees.map((emp, index) => `
+            <div draggable="true" 
+                 ondragstart="handleRowDragStart(event, ${index})" 
+                 ondragover="handleRowDragOver(event)" 
+                 ondragleave="handleRowDragLeave(event)" 
+                 ondrop="handleRowDrop(event, ${index})" 
+                 ondragend="handleRowDragEnd(event)"
+                 class="employee-row grid grid-cols-12 gap-1 items-center p-2 rounded hover:bg-gray-100 text-sm border-b border-gray-100 bg-white transition-colors duration-150 ${!emp.included ? 'opacity-40' : ''}">
+                <div class="col-span-1 flex justify-center">
                     <input type="checkbox" ${emp.included ? 'checked' : ''} onchange="toggleEmployee('${emp.id}')" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer">
                 </div>
+                <div class="col-span-1 flex justify-center cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 text-lg leading-none" title="드래그하여 순서 변경">
+                    ≡
+                </div>
                 <div class="col-span-3 truncate" title="${emp.team}">
-                    <span class="inline-block w-3 h-3 rounded-full mr-1 align-middle" style="background-color: ${state.teamColors[emp.team] || '#ddd'}"></span>
+                    <span class="inline-block w-3 h-3 rounded-full mr-1 align-middle shadow-sm" style="background-color: ${state.teamColors[emp.team] || '#ddd'}"></span>
                     ${emp.team}
                 </div>
                 <div class="col-span-3 font-medium truncate">${emp.name}</div>
-                <div class="col-span-4 text-gray-600 font-mono">${emp.number}</div>
+                <div class="col-span-4 text-gray-600 font-mono text-xs">${emp.number}</div>
             </div>
         `).join('');
     }
@@ -502,10 +646,9 @@
         const stripH = spec.rows * spec.h;
         
         // A4 내부 사용 가능 공간: 너비 190mm, 높이 277mm
-        // 소수점 오차 방지를 위해 0.1mm 정도의 톨러런스 부여
         const stripsPerRow = Math.floor((190 + 0.1) / stripW) || 1; 
         const rowsPerPage = Math.floor((277 + 0.1) / stripH) || 1;
-        const stripsPerPage = stripsPerRow * rowsPerPage; // 한 페이지에 들어갈 수 있는 최대 라벨 개수
+        const stripsPerPage = stripsPerRow * rowsPerPage;
 
         const pages = [];
         for (let i = 0; i < strips.length; i += stripsPerPage) {
@@ -573,6 +716,7 @@
                     if (a.team === state.baseTeam && b.team !== state.baseTeam) return -1;
                     if (a.team !== state.baseTeam && b.team === state.baseTeam) return 1;
                 }
+                // Drag & Drop 등으로 갱신된 originalIndex를 기준으로 배열됨
                 return a.originalIndex - b.originalIndex;
             });
 
@@ -595,11 +739,9 @@
             }
         });
 
-        // ★ 모아진 스트립들을 규격에 맞춰 A4 페이지 단위로 묶음
         const mainPages = chunkStripsIntoPages(mainStrips, mainSpec);
         const modPages = chunkStripsIntoPages(modStrips, modSpec);
 
-        // 컨테이너에 각각 분리된 페이지들 추가
         mainPages.forEach(page => container.appendChild(page));
         modPages.forEach(page => container.appendChild(page));
     }
@@ -626,11 +768,13 @@
             cell.style.boxSizing = 'border-box';
             
             const isSmallCell = spec.h <= 8;
-            const fontSize = isSmallCell ? '11px' : '14px'; 
+            // ★ 기존보다 폰트 사이즈를 대폭 확대 (11px -> 13px, 14px -> 16px)
+            const fontSize = isSmallCell ? '13px' : '16px'; 
             
             cell.style.fontSize = fontSize;
             cell.style.letterSpacing = '-0.5px';
-            cell.style.lineHeight = '1'; 
+            // ★ 텍스트가 미세하게 치우치는 현상 수정 (1 -> normal 로 복원하여 폰트 고유의 정중앙 배치)
+            cell.style.lineHeight = 'normal'; 
 
             if (slot) {
                 if (slot.type === 'person') {
@@ -641,7 +785,8 @@
                         cell.innerHTML = `
                             <div class="flex flex-col items-center justify-center w-full h-full">
                                 <div class="font-bold leading-tight whitespace-nowrap">${slot.data.name}</div>
-                                <div class="font-bold text-[0.9em] leading-tight text-gray-800">(${slot.data.number})</div>
+                                <!-- ★ 간격 미세 조정 및 축소 옵션 제거 -->
+                                <div class="font-bold leading-tight text-gray-800">${slot.data.number}</div>
                             </div>
                         `;
                     } 
@@ -649,7 +794,8 @@
                         cell.innerHTML = `
                             <div class="w-full h-full flex justify-center items-center px-1 whitespace-nowrap">
                                 <span class="font-bold">${slot.data.name}</span>
-                                <span class="font-bold text-[0.9em] text-gray-800 ml-1">(${slot.data.number})</span>
+                                <!-- ★ 이름과의 간격(ml-1.5) 확보 -->
+                                <span class="font-bold text-gray-800 ml-1.5">${slot.data.number}</span>
                             </div>
                         `;
                     }
@@ -682,12 +828,9 @@
             showModalMsg("출력할 데이터가 없습니다.");
             return;
         }
-
-        // 다운로드 실행 전, [실제 크기] 안내 팝업 띄우기
         document.getElementById('pdf-alert-modal').classList.remove('hidden');
     }
 
-    // 팝업에서 [확인]을 눌렀을 때 실제 다운로드 로직 실행
     function continueGeneratePDF() {
         closeModal();
 
@@ -700,8 +843,6 @@
         document.body.classList.remove('h-screen', 'overflow-hidden');
         rightPanel.classList.remove('overflow-y-auto');
         
-        // ★ PDF 모드 활성화: 각 A4 페이지(.a4-page)의 여백 및 섀도우를 없애서 
-        // 전체 높이가 정확히 N * 297mm가 되도록 만들어 자동 잘림 유도
         previewContainer.classList.add('pdf-mode');
         
         window.scrollTo(0, 0);
@@ -712,14 +853,15 @@
             filename:     `iPECS_라벨_${new Date().toISOString().slice(0,10)}.pdf`,
             image:        { type: 'jpeg', quality: 1.0 },
             html2canvas:  { 
-                scale: 3,
+                // ★ 해상도 극대화: 스케일을 3에서 5로 향상시켜 프린트 시 선명도를 올림
+                scale: 5,
                 useCORS: true,
                 scrollY: 0, 
                 scrollX: 0
             },
             jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            // ★ a4-page 클래스 단위로 확실히 끊고, 불필요한 마지막 빈장 방지를 위해 mode: 'css'만 유지
-            pagebreak:    { mode: 'css' } 
+            // ★ 빈장 방지를 위해 html2pdf 자체 avoid 옵션으로 롤백하여 자연스럽게 분할되도록 설정
+            pagebreak:    { mode: 'css', avoid: '.a4-page' } 
         };
 
         const btn = document.querySelector('button[onclick="generatePDF()"]');
