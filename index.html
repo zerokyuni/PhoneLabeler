@@ -59,6 +59,17 @@
             display: none !important;
         }
 
+        /* ★ PDF 생성 시 페이지 워터마크 가리기 */
+        .pdf-mode .page-watermark {
+            display: none !important;
+        }
+
+        /* ★ PDF 출력 시 Noto Sans 글꼴이 아래로 쏠리는 현상 광학적 보정 (위로 끌어올림) */
+        .pdf-mode .auto-fit-box {
+            position: relative;
+            top: -0.6mm; /* html2canvas의 렌더링 오차만큼 위로 이동시켜 정중앙을 맞춤 */
+        }
+
         /* 절취선 (연한 회색) */
         .cut-line {
             border: 0.5px solid #d1d5db; /* Tailwind gray-300 */
@@ -474,7 +485,7 @@
     }
 
     function downloadTemplate() {
-        const csvContent = "팀,이름,번호\n진안팀,홍길동,1001\n빠망팀,김철수,1002\n홍철팀,박명수,2001";
+        const csvContent = "팀,이름,번호\n개발팀,홍길동,1001\n개발팀,김철수,1002\n인사팀,이영희,2001";
         const blob = new Blob(["\uFEFF"+csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         const url = URL.createObjectURL(blob);
@@ -791,8 +802,26 @@
         const mainPages = chunkStripsIntoPages(mainStrips, mainSpec);
         const modPages = chunkStripsIntoPages(modStrips, modSpec);
 
-        mainPages.forEach(page => container.appendChild(page));
-        modPages.forEach(page => container.appendChild(page));
+        // ★ 페이지 병합 및 워터마크(페이지 번호) 삽입 로직
+        const allPages = [...mainPages, ...modPages];
+        const totalPages = allPages.length;
+
+        allPages.forEach((page, idx) => {
+            page.classList.add('relative');
+            
+            // ★ 배경에 대문짝만한 페이지 번호 워터마크 생성 (가운데 정렬)
+            const watermark = document.createElement('div');
+            watermark.className = 'page-watermark absolute inset-0 flex items-center justify-center pointer-events-none select-none z-0';
+            watermark.innerHTML = `<span class="text-[180px] font-black text-blue-500 opacity-20 tracking-widest">${idx + 1} / ${totalPages}</span>`;
+            
+            page.appendChild(watermark);
+            container.appendChild(page);
+        });
+
+        // ★ DOM 렌더링 직후(비동기) 폰트 사이즈 꽉 차게 자동 맞춤 실행
+        setTimeout(() => {
+            applyAutoFit();
+        }, 0);
     }
 
     // ★ startIndex 인자를 추가하여 몇 번 슬롯부터 시작인지 추적
@@ -810,19 +839,16 @@
         
         slotsData.forEach((slot, index) => {
             const cell = document.createElement('div');
-            // ★ 슬롯 번호를 띄우기 위해 relative 클래스 추가
-            cell.className = 'inner-cut-line flex items-center justify-center text-center overflow-hidden relative';
+            // ★ 상하 여백을 풀어 글씨가 최대한 커질 수 있도록 최소한의 가로 여백(px-[1mm])만 적용
+            cell.className = 'inner-cut-line flex items-center justify-center text-center overflow-hidden relative px-[1mm]';
             
             cell.style.width = `${spec.w}mm`;
             cell.style.height = `${spec.h}mm`;
             cell.style.boxSizing = 'border-box';
             
             const isSmallCell = spec.h <= 8;
-            const baseFontSize = isSmallCell ? 13 : 16; 
-            
-            cell.style.fontSize = `${baseFontSize}px`;
-            cell.style.letterSpacing = '-0.5px';
-            cell.style.lineHeight = 'normal'; 
+            // ★ 자동 맞춤을 위해 최대 폰트 크기를 매우 높게 설정 (초과 시 스스로 줄어듦)
+            const maxFontSize = isSmallCell ? 24 : 32; 
 
             let innerContent = '';
             if (slot) {
@@ -832,29 +858,32 @@
                     
                     if (!isSmallCell) {
                         innerContent = `
-                            <div class="flex flex-col items-center justify-center w-full h-full">
-                                <div class="font-bold leading-tight whitespace-nowrap">${slot.data.name}</div>
-                                <div class="font-bold leading-tight text-gray-800">${slot.data.number}</div>
+                            <div class="auto-fit-box w-full h-full flex flex-col items-center justify-center overflow-hidden" data-max-size="${maxFontSize}">
+                                <div class="font-bold leading-none whitespace-nowrap tracking-tight">${slot.data.name}</div>
+                                <div class="font-bold leading-none text-gray-800 tracking-tight mt-[1px]">${slot.data.number}</div>
                             </div>
                         `;
                     } 
                     else {
                         innerContent = `
-                            <div class="w-full h-full flex justify-center items-center px-1 whitespace-nowrap">
-                                <span class="font-bold">${slot.data.name}</span>
-                                <span class="font-bold text-gray-800 ml-1.5">${slot.data.number}</span>
+                            <div class="auto-fit-box w-full h-full flex justify-center items-center overflow-hidden" data-max-size="${maxFontSize}">
+                                <span class="font-bold whitespace-nowrap leading-none tracking-tight">${slot.data.name}</span>
+                                <span class="font-bold text-gray-800 whitespace-nowrap leading-none tracking-tight ml-1.5">${slot.data.number}</span>
                             </div>
                         `;
                     }
                 } else if (slot.type === 'special') {
                     cell.style.backgroundColor = '#e5e7eb'; 
                     cell.style.color = '#374151';
-                    cell.style.fontWeight = 'bold';
-                    innerContent = slot.text;
+                    innerContent = `
+                        <div class="auto-fit-box w-full h-full flex items-center justify-center overflow-hidden" data-max-size="${maxFontSize}">
+                            <span class="font-bold whitespace-nowrap leading-none tracking-tight">${slot.text}</span>
+                        </div>
+                    `;
                 }
             }
             
-            // ★ 슬롯 좌측 상단 고유 번호(PDF 생성 시 자동 숨김)
+            // ★ 슬롯 좌측 상단에 고유 번호를 삽입 (PDF 생성 시엔 CSS에 의해 자동 숨김)
             const slotNum = startIndex + index;
             cell.innerHTML = `
                 <div class="slot-number absolute top-[2px] left-[3px] text-[8px] text-gray-400 font-mono opacity-80 pointer-events-none select-none z-10 leading-none">
@@ -867,6 +896,21 @@
         });
 
         return strip;
+    }
+
+    // ★ 폰트 사이즈 자동 맞춤 로직 (엑셀 셀 맞춤 효과)
+    function applyAutoFit() {
+        const boxes = document.querySelectorAll('.auto-fit-box');
+        boxes.forEach(box => {
+            let currentSize = parseInt(box.getAttribute('data-max-size'));
+            box.style.fontSize = currentSize + 'px';
+            
+            // 콘텐츠 크기(scrollWidth/Height)가 부모(clientWidth/Height)를 초과하면 0.5px씩 줄여가며 정확히 맞춤
+            while (currentSize > 6 && (box.scrollWidth > box.clientWidth || box.scrollHeight > box.clientHeight)) {
+                currentSize -= 0.5;
+                box.style.fontSize = currentSize + 'px';
+            }
+        });
     }
 
     function showModalMsg(msg) {
