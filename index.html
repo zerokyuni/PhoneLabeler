@@ -99,16 +99,20 @@
 
         <div class="flex-1 overflow-y-auto p-6 space-y-8">
             
-            <!-- 1. CSV 업로드 -->
+            <!-- 1. CSV 및 로고 업로드 -->
             <section>
-                <h2 class="text-sm font-semibold text-gray-500 uppercase mb-3">1. 데이터 업로드</h2>
+                <div class="flex justify-between items-end mb-3">
+                    <h2 class="text-sm font-semibold text-gray-500 uppercase">1. 데이터 및 로고 업로드</h2>
+                    <button onclick="clearLogo()" class="text-xs text-red-500 hover:text-red-700 underline" title="등록된 로고 워터마크 삭제">로고 초기화</button>
+                </div>
                 <div class="flex items-center justify-center w-full">
-                    <label id="drop-zone" for="csv-upload" class="flex flex-col items-center justify-center w-full h-24 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition relative">
+                    <label id="drop-zone" for="file-upload" class="flex flex-col items-center justify-center w-full h-24 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition relative">
                         <div class="flex flex-col items-center justify-center pt-5 pb-6 pointer-events-none">
                             <p class="mb-1 text-sm text-gray-500"><span class="font-semibold text-blue-600">클릭</span> 또는 <span class="font-semibold text-blue-600">파일 드래그 앤 드롭</span></p>
-                            <p class="text-xs text-gray-400">팀이름, 이름, 번호 포함 (.csv)</p>
+                            <p class="text-xs text-gray-400">CSV 연락처 또는 로고 이미지(PNG/JPG)</p>
                         </div>
-                        <input id="csv-upload" type="file" accept=".csv" class="hidden" onchange="handleFileUpload(event)" />
+                        <!-- ★ 파일 업로드에서 이미지(image/*) 파일도 허용하도록 속성 변경 -->
+                        <input id="file-upload" type="file" accept=".csv, image/*" class="hidden" onchange="handleFileUpload(event)" />
                     </label>
                 </div>
             </section>
@@ -274,15 +278,29 @@
         moduleDevice: '9024',
         specialKeys: [],
         colorMode: 'auto', 
-        teamColors: {}
+        teamColors: {},
+        logoDataUrl: null // ★ 로고 이미지 데이터 (Base64) 추가
     };
 
     // 드래그 앤 드롭용 글로벌 변수
     let dragStartIndex = -1;
 
     function init() {
+        // ★ 브라우저 로컬 스토리지에 저장된 로고가 있으면 불러오기
+        const savedLogo = localStorage.getItem('ipecs_logo');
+        if (savedLogo) {
+            state.logoDataUrl = savedLogo;
+        }
         setupDragAndDrop();
     }
+
+    // ★ 로고 초기화 함수
+    window.clearLogo = function() {
+        state.logoDataUrl = null;
+        localStorage.removeItem('ipecs_logo');
+        generatePreviewDOM();
+        showModalMsg("로고가 초기화되었습니다.");
+    };
 
     // --- 파일 드래그 앤 드롭 설정 ---
     function setupDragAndDrop() {
@@ -309,19 +327,44 @@
                 const file = e.dataTransfer.files[0];
                 if (file.name.toLowerCase().endsWith('.csv')) {
                     processCSVFile(file);
+                } else if (file.type.startsWith('image/')) { // ★ 이미지 파일 허용
+                    processImageFile(file);
                 } else {
-                    showModalMsg("CSV 파일만 업로드 가능합니다.");
+                    showModalMsg("CSV 파일이나 이미지 파일만 업로드 가능합니다.");
                 }
             }
         });
     }
 
-    // --- CSV 파싱 및 상태 업데이트 ---
+    // --- 파일 업로드 분기 처리 ---
     function handleFileUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-        processCSVFile(file);
+        
+        if (file.name.toLowerCase().endsWith('.csv')) {
+            processCSVFile(file);
+        } else if (file.type.startsWith('image/')) {
+            processImageFile(file);
+        } else {
+            showModalMsg("지원하지 않는 파일 형식입니다.");
+        }
         event.target.value = ''; // Input 리셋
+    }
+
+    // ★ 로고 이미지 파일 파싱 및 로컬스토리지 저장 로직
+    function processImageFile(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            state.logoDataUrl = e.target.result; // Base64 인코딩
+            try {
+                localStorage.setItem('ipecs_logo', state.logoDataUrl);
+            } catch(err) {
+                console.warn("로컬 스토리지 용량 초과로 로고가 저장되지 않았습니다.");
+            }
+            generatePreviewDOM();
+            showModalMsg("로고가 성공적으로 적용되었습니다!");
+        };
+        reader.readAsDataURL(file);
     }
 
     function processCSVFile(file) {
@@ -402,7 +445,6 @@
         extractTeams();
         renderUI();
         
-        // 스크롤 맨 아래로 이동하여 추가된 항목 보여주기
         setTimeout(() => {
             const list = document.getElementById('employee-list');
             list.scrollTop = list.scrollHeight;
@@ -416,9 +458,9 @@
             if (field === 'team') {
                 extractTeams();
                 renderBaseTeamSelect();
-                renderEmployeeList(); // 팀 색상 재적용을 위해 리스트 리렌더링
+                renderEmployeeList(); 
             }
-            generatePreviewDOM(); // 프리뷰 즉시 업데이트
+            generatePreviewDOM(); 
         }
     };
 
@@ -438,7 +480,6 @@
             state.baseTeam = '';
         }
 
-        // 색상 모드에 따른 처리
         if (state.colorMode === 'auto') {
             state.teamColors = {}; 
             state.teams.forEach((team, index) => {
@@ -882,12 +923,14 @@
                     `;
                 }
             } else {
-                // ★ 빈 자리(null)일 경우 로고 워터마크 삽입
-                innerContent = `
-                    <div class="w-full h-full flex items-center justify-center p-[1.5mm] opacity-20 pointer-events-none select-none">
-                        <img src="logo.png" alt="iPECS Logo" class="w-full h-full object-contain" />
-                    </div>
-                `;
+                // ★ 빈 자리(null)일 경우 사용자가 등록한 로고(Base64) 데이터 삽입
+                if (state.logoDataUrl) {
+                    innerContent = `
+                        <div class="w-full h-full flex items-center justify-center p-[1.5mm] opacity-20 pointer-events-none select-none">
+                            <img src="${state.logoDataUrl}" alt="iPECS Logo" class="w-full h-full object-contain" />
+                        </div>
+                    `;
+                }
             }
             
             // ★ 슬롯 좌측 상단에 고유 번호를 삽입 (PDF 생성 시엔 CSS에 의해 자동 숨김)
