@@ -474,7 +474,7 @@
     }
 
     function downloadTemplate() {
-        const csvContent = "팀,이름,번호\n개발팀,홍길동,1001\n개발팀,김철수,1002\n인사팀,이영희,2001";
+        const csvContent = "팀,이름,번호\n진안팀,홍길동,1001\n빠망팀,김철수,1002\n홍철팀,박명수,2001";
         const blob = new Blob(["\uFEFF"+csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         const url = URL.createObjectURL(blob);
