@@ -52,7 +52,11 @@
             border: none !important;
             height: 296.5mm !important; /* 픽셀 오차로 인한 빈 장 생성을 막기 위해 높이 미세 축소 */
             overflow: hidden;
-            /* 강제 page-break를 제거하여 2페이지 빈장 버그 해결 */
+        }
+
+        /* ★ PDF 생성 시 슬롯 번호 가리기 */
+        .pdf-mode .slot-number {
+            display: none !important;
         }
 
         /* 절취선 (연한 회색) */
@@ -167,7 +171,7 @@
                     </div>
                 </div>
                 
-                <!-- 직원 리스트 (드래그앤드롭 가능) -->
+                <!-- 직원 리스트 (드래그앤드롭 + 즉석 수정 가능) -->
                 <div class="border rounded-md bg-white flex-1 flex flex-col overflow-hidden">
                     <div class="bg-gray-50 grid grid-cols-12 gap-1 p-2 text-xs font-semibold text-gray-600 border-b items-center">
                         <div class="col-span-1 text-center flex justify-center">
@@ -177,12 +181,19 @@
                         <div class="col-span-1 text-center" title="드래그 앤 드롭으로 순서 변경">순서</div>
                         <div class="col-span-3">팀</div>
                         <div class="col-span-3">이름</div>
-                        <div class="col-span-4">번호</div>
+                        <div class="col-span-3">번호</div>
+                        <div class="col-span-1 text-center">삭제</div>
                     </div>
                     <div id="employee-list" class="flex-1 overflow-y-auto p-2 space-y-1">
                         <div class="text-center text-gray-400 text-sm py-8">CSV 파일을 업로드해주세요.</div>
                     </div>
                 </div>
+
+                <!-- ★ 인원 추가 버튼 (리스트 아래로 이동) -->
+                <button onclick="addNewEmployee()" class="mt-2 w-full text-xs bg-white hover:bg-gray-50 text-gray-600 px-2 py-2.5 rounded-md border border-gray-300 border-dashed shadow-sm transition flex justify-center items-center font-medium">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    새 인원 수동 추가
+                </button>
             </section>
 
         </div>
@@ -251,7 +262,7 @@
         mainDevice: '9020',
         moduleDevice: '9024',
         specialKeys: [],
-        colorMode: 'auto', // 'auto' 또는 'custom'
+        colorMode: 'auto', 
         teamColors: {}
     };
 
@@ -344,7 +355,7 @@
 
                     parsed = parsed.filter(p => p.name !== `이름없음${parsed.indexOf(p)}` || p.number !== '');
                     
-                    // ★ 파일 새로 업로드 시 기존 설정 및 데이터 완벽 초기화 (덮어쓰기 방지)
+                    // 기존 설정 초기화
                     state.specialKeys = [];
                     state.baseTeam = '';
                     document.getElementById('sk-slot').value = '';
@@ -366,6 +377,46 @@
         reader.readAsArrayBuffer(file);
     }
 
+    // --- 데이터 추가 및 수정 (Inline Editing) ---
+    window.addNewEmployee = function() {
+        const index = state.rawEmployees.length;
+        state.rawEmployees.push({
+            id: `emp_${index}_${Date.now()}`,
+            originalIndex: index,
+            team: '미지정',
+            name: '새 직원',
+            number: '0000',
+            included: true
+        });
+        extractTeams();
+        renderUI();
+        
+        // 스크롤 맨 아래로 이동하여 추가된 항목 보여주기
+        setTimeout(() => {
+            const list = document.getElementById('employee-list');
+            list.scrollTop = list.scrollHeight;
+        }, 50);
+    };
+
+    window.updateEmployeeData = function(id, field, value) {
+        const emp = state.rawEmployees.find(e => e.id === id);
+        if (emp) {
+            emp[field] = value.trim();
+            if (field === 'team') {
+                extractTeams();
+                renderBaseTeamSelect();
+                renderEmployeeList(); // 팀 색상 재적용을 위해 리스트 리렌더링
+            }
+            generatePreviewDOM(); // 프리뷰 즉시 업데이트
+        }
+    };
+
+    window.deleteEmployee = function(id) {
+        state.rawEmployees = state.rawEmployees.filter(e => e.id !== id);
+        extractTeams();
+        renderUI();
+    };
+
     // --- 팀 추출 및 색상 할당 로직 ---
     function extractTeams() {
         const teamSet = new Set();
@@ -378,12 +429,11 @@
 
         // 색상 모드에 따른 처리
         if (state.colorMode === 'auto') {
-            state.teamColors = {}; // 완전히 덮어쓰기
+            state.teamColors = {}; 
             state.teams.forEach((team, index) => {
                 state.teamColors[team] = COLOR_PALETTE[index % COLOR_PALETTE.length];
             });
         } else {
-            // 커스텀 모드일 때는, 새로운 팀이 생겼을 때만 기본색 부여 (기존에 설정한 커스텀색 보호)
             state.teams.forEach((team, index) => {
                 if (!state.teamColors[team]) {
                     state.teamColors[team] = COLOR_PALETTE[index % COLOR_PALETTE.length];
@@ -392,7 +442,6 @@
         }
     }
 
-    // --- 컬러 커스터마이징 렌더링 ---
     function toggleColorMode(mode) {
         state.colorMode = mode;
         const panel = document.getElementById('custom-color-panel');
@@ -404,7 +453,7 @@
         } else {
             panel.classList.add('hidden');
             panel.classList.remove('grid');
-            extractTeams(); // 자동 색상으로 리셋
+            extractTeams(); 
             renderUI();
         }
     }
@@ -421,10 +470,9 @@
 
     function updateTeamColor(team, colorHex) {
         state.teamColors[team] = colorHex;
-        generatePreviewDOM(); // 컬러만 바뀌면 프리뷰만 다시 렌더링
+        generatePreviewDOM(); 
     }
 
-    // --- 다운로드 서식 ---
     function downloadTemplate() {
         const csvContent = "팀,이름,번호\n개발팀,홍길동,1001\n개발팀,김철수,1002\n인사팀,이영희,2001";
         const blob = new Blob(["\uFEFF"+csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -438,7 +486,6 @@
         document.body.removeChild(link);
     }
 
-    // --- 특수키 및 상태 업데이트 ---
     function addSpecialKey() {
         const slotInput = document.getElementById('sk-slot');
         const textInput = document.getElementById('sk-text');
@@ -473,7 +520,6 @@
         renderUI();
     }
 
-    // --- 데이터 리스트 컨트롤 ---
     function toggleEmployee(id) {
         const emp = state.rawEmployees.find(e => e.id === id);
         if (emp) {
@@ -482,7 +528,6 @@
         }
     }
 
-    // ★ 전체 선택/해제 로직 추가
     function toggleAllEmployees(isChecked) {
         state.rawEmployees.forEach(emp => emp.included = isChecked);
         renderUI();
@@ -516,11 +561,9 @@
         const sourceIndex = dragStartIndex;
         if (sourceIndex === -1 || sourceIndex === dropIndex) return;
 
-        // 배열에서 아이템을 빼서 드롭된 위치로 이동
         const draggedItem = state.rawEmployees.splice(sourceIndex, 1)[0];
         state.rawEmployees.splice(dropIndex, 0, draggedItem);
 
-        // 변경된 배열 순서를 기반으로 originalIndex를 재할당 (출력 순서 고정을 위해)
         state.rawEmployees.forEach((emp, i) => emp.originalIndex = i);
 
         dragStartIndex = -1;
@@ -530,7 +573,6 @@
     window.handleRowDragEnd = function(e) {
         e.target.style.opacity = '1';
         dragStartIndex = -1;
-        // 잔여 drag-over 클래스 정리
         document.querySelectorAll('.employee-row').forEach(row => row.classList.remove('drag-over'));
     };
 
@@ -548,16 +590,14 @@
         const selectAllCb = document.getElementById('select-all-cb');
 
         if (state.rawEmployees.length === 0) {
-            container.innerHTML = '<div class="text-center text-gray-400 text-sm py-8">CSV 파일을 업로드해주세요.</div>';
+            container.innerHTML = '<div class="text-center text-gray-400 text-sm py-8">데이터가 없습니다. CSV를 업로드하거나 인원을 추가해주세요.</div>';
             selectAllCb.checked = false;
             return;
         }
 
-        // 전체 선택 체크박스 상태 동기화
         const allChecked = state.rawEmployees.every(emp => emp.included);
         selectAllCb.checked = allChecked;
 
-        // 드래그 앤 드롭이 가능하도록 렌더링 변경
         container.innerHTML = state.rawEmployees.map((emp, index) => `
             <div draggable="true" 
                  ondragstart="handleRowDragStart(event, ${index})" 
@@ -572,12 +612,21 @@
                 <div class="col-span-1 flex justify-center cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 text-lg leading-none" title="드래그하여 순서 변경">
                     ≡
                 </div>
-                <div class="col-span-3 truncate" title="${emp.team}">
-                    <span class="inline-block w-3 h-3 rounded-full mr-1 align-middle shadow-sm" style="background-color: ${state.teamColors[emp.team] || '#ddd'}"></span>
-                    ${emp.team}
+                <div class="col-span-3 flex items-center pr-1">
+                    <span class="inline-block w-3 h-3 rounded-full mr-1 flex-shrink-0 shadow-sm" style="background-color: ${state.teamColors[emp.team] || '#ddd'}"></span>
+                    <input type="text" value="${emp.team}" onchange="updateEmployeeData('${emp.id}', 'team', this.value)" class="w-full bg-transparent border border-transparent hover:border-gray-300 focus:border-blue-400 focus:bg-white rounded px-1 text-sm outline-none transition-all truncate" title="${emp.team}">
                 </div>
-                <div class="col-span-3 font-medium truncate">${emp.name}</div>
-                <div class="col-span-4 text-gray-600 font-mono text-xs">${emp.number}</div>
+                <div class="col-span-3 pr-1">
+                    <input type="text" value="${emp.name}" onchange="updateEmployeeData('${emp.id}', 'name', this.value)" class="w-full bg-transparent border border-transparent hover:border-gray-300 focus:border-blue-400 focus:bg-white rounded px-1 font-medium text-sm outline-none transition-all truncate" title="${emp.name}">
+                </div>
+                <div class="col-span-3 pr-1">
+                    <input type="text" value="${emp.number}" onchange="updateEmployeeData('${emp.id}', 'number', this.value)" class="w-full bg-transparent border border-transparent hover:border-gray-300 focus:border-blue-400 focus:bg-white rounded px-1 text-gray-600 font-mono text-xs outline-none transition-all truncate" title="${emp.number}">
+                </div>
+                <div class="col-span-1 flex justify-center">
+                    <button onclick="deleteEmployee('${emp.id}')" class="text-gray-400 hover:text-red-500 transition-colors" title="삭제">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    </button>
+                </div>
             </div>
         `).join('');
     }
@@ -645,7 +694,6 @@
         const stripW = spec.cols * spec.w;
         const stripH = spec.rows * spec.h;
         
-        // A4 내부 사용 가능 공간: 너비 190mm, 높이 277mm
         const stripsPerRow = Math.floor((190 + 0.1) / stripW) || 1; 
         const rowsPerPage = Math.floor((277 + 0.1) / stripH) || 1;
         const stripsPerPage = stripsPerRow * rowsPerPage;
@@ -716,7 +764,6 @@
                     if (a.team === state.baseTeam && b.team !== state.baseTeam) return -1;
                     if (a.team !== state.baseTeam && b.team === state.baseTeam) return 1;
                 }
-                // Drag & Drop 등으로 갱신된 originalIndex를 기준으로 배열됨
                 return a.originalIndex - b.originalIndex;
             });
 
@@ -732,10 +779,12 @@
             let modSlice = slots.slice(totalMain, totalSlots);
 
             if (totalMain > 0) {
-                mainStrips.push(createStripDOM(mainSpec, mainSlice));
+                // 본체는 1번 슬롯부터 시작
+                mainStrips.push(createStripDOM(mainSpec, mainSlice, 1));
             }
             if (totalMod > 0) {
-                modStrips.push(createStripDOM(modSpec, modSlice));
+                // 모듈은 본체 슬롯개수 이후 번호부터 시작
+                modStrips.push(createStripDOM(modSpec, modSlice, totalMain + 1));
             }
         });
 
@@ -746,7 +795,8 @@
         modPages.forEach(page => container.appendChild(page));
     }
 
-    function createStripDOM(spec, slotsData) {
+    // ★ startIndex 인자를 추가하여 몇 번 슬롯부터 시작인지 추적
+    function createStripDOM(spec, slotsData, startIndex = 1) {
         const strip = document.createElement('div');
         strip.className = 'label-strip cut-line bg-white';
         strip.style.display = 'grid';
@@ -758,43 +808,40 @@
         strip.style.height = `${spec.rows * spec.h}mm`;
         strip.style.boxSizing = 'border-box';
         
-        // ★ forEach에 index 파라미터 및 좌/우 정렬 로직 제거
-        slotsData.forEach(slot => {
+        slotsData.forEach((slot, index) => {
             const cell = document.createElement('div');
-            cell.className = 'inner-cut-line flex items-center justify-center text-center overflow-hidden';
+            // ★ 슬롯 번호를 띄우기 위해 relative 클래스 추가
+            cell.className = 'inner-cut-line flex items-center justify-center text-center overflow-hidden relative';
             
             cell.style.width = `${spec.w}mm`;
             cell.style.height = `${spec.h}mm`;
             cell.style.boxSizing = 'border-box';
             
             const isSmallCell = spec.h <= 8;
-            // ★ 기존보다 폰트 사이즈를 대폭 확대 (11px -> 13px, 14px -> 16px)
-            const fontSize = isSmallCell ? '13px' : '16px'; 
+            const baseFontSize = isSmallCell ? 13 : 16; 
             
-            cell.style.fontSize = fontSize;
+            cell.style.fontSize = `${baseFontSize}px`;
             cell.style.letterSpacing = '-0.5px';
-            // ★ 텍스트가 미세하게 치우치는 현상 수정 (1 -> normal 로 복원하여 폰트 고유의 정중앙 배치)
             cell.style.lineHeight = 'normal'; 
 
+            let innerContent = '';
             if (slot) {
                 if (slot.type === 'person') {
                     cell.style.backgroundColor = state.teamColors[slot.data.team] || '#fff';
                     cell.style.color = '#111';
                     
                     if (!isSmallCell) {
-                        cell.innerHTML = `
+                        innerContent = `
                             <div class="flex flex-col items-center justify-center w-full h-full">
                                 <div class="font-bold leading-tight whitespace-nowrap">${slot.data.name}</div>
-                                <!-- ★ 간격 미세 조정 및 축소 옵션 제거 -->
                                 <div class="font-bold leading-tight text-gray-800">${slot.data.number}</div>
                             </div>
                         `;
                     } 
                     else {
-                        cell.innerHTML = `
+                        innerContent = `
                             <div class="w-full h-full flex justify-center items-center px-1 whitespace-nowrap">
                                 <span class="font-bold">${slot.data.name}</span>
-                                <!-- ★ 이름과의 간격(ml-1.5) 확보 -->
                                 <span class="font-bold text-gray-800 ml-1.5">${slot.data.number}</span>
                             </div>
                         `;
@@ -803,16 +850,25 @@
                     cell.style.backgroundColor = '#e5e7eb'; 
                     cell.style.color = '#374151';
                     cell.style.fontWeight = 'bold';
-                    cell.textContent = slot.text;
+                    innerContent = slot.text;
                 }
             }
+            
+            // ★ 슬롯 좌측 상단 고유 번호(PDF 생성 시 자동 숨김)
+            const slotNum = startIndex + index;
+            cell.innerHTML = `
+                <div class="slot-number absolute top-[2px] left-[3px] text-[8px] text-gray-400 font-mono opacity-80 pointer-events-none select-none z-10 leading-none">
+                    ${slotNum}
+                </div>
+                ${innerContent}
+            `;
+            
             strip.appendChild(cell);
         });
 
         return strip;
     }
 
-    // ★ 모달 제어 함수 추가
     function showModalMsg(msg) {
         document.getElementById('custom-modal-text').textContent = msg;
         document.getElementById('custom-modal').classList.remove('hidden');
@@ -822,7 +878,6 @@
         document.getElementById('pdf-alert-modal').classList.add('hidden');
     }
 
-    // --- PDF 출력 처리 ---
     function generatePDF() {
         if (state.rawEmployees.filter(e=>e.included).length === 0) {
             showModalMsg("출력할 데이터가 없습니다.");
@@ -853,14 +908,12 @@
             filename:     `iPECS_라벨_${new Date().toISOString().slice(0,10)}.pdf`,
             image:        { type: 'jpeg', quality: 1.0 },
             html2canvas:  { 
-                // ★ 해상도 극대화: 스케일을 3에서 5로 향상시켜 프린트 시 선명도를 올림
                 scale: 5,
                 useCORS: true,
                 scrollY: 0, 
                 scrollX: 0
             },
             jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            // ★ 빈장 방지를 위해 html2pdf 자체 avoid 옵션으로 롤백하여 자연스럽게 분할되도록 설정
             pagebreak:    { mode: 'css', avoid: '.a4-page' } 
         };
 
