@@ -881,6 +881,13 @@
                         </div>
                     `;
                 }
+            } else {
+                // ★ 빈 자리(null)일 경우 로고 워터마크 삽입
+                innerContent = `
+                    <div class="w-full h-full flex items-center justify-center p-[1.5mm] opacity-20 pointer-events-none select-none">
+                        <img src="logo.png" alt="iPECS Logo" class="w-full h-full object-contain" />
+                    </div>
+                `;
             }
             
             // ★ 슬롯 좌측 상단에 고유 번호를 삽입 (PDF 생성 시엔 CSS에 의해 자동 숨김)
